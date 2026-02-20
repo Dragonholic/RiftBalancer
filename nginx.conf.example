@@ -1,0 +1,39 @@
+# Nginx 설정 예제 파일
+# /etc/nginx/sites-available/riftbalancer 에 복사하여 사용
+
+server {
+    listen 80;
+    server_name your-domain.com;  # 도메인이 있으면 입력, 없으면 IP 주소 또는 _ (모든 호스트)
+
+    # 로그 설정
+    access_log /var/log/nginx/riftbalancer_access.log;
+    error_log /var/log/nginx/riftbalancer_error.log;
+
+    # 클라이언트 최대 업로드 크기
+    client_max_body_size 10M;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket 지원 (필요한 경우)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # 타임아웃 설정
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # 정적 파일 직접 서빙 (선택사항)
+    location /static {
+        alias /home/pi/RiftBalancer/static;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}

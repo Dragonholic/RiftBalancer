@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoL Custom Matchmaker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 LoL Custom Matchmaker</h1>
+            <p>10인 내전 자동 팀 편성 시스템</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" onclick="showTab('players')">플레이어 관리</button>
+            <button class="tab-btn" onclick="showTab('matchmaking')">매치메이킹</button>
+            <button class="tab-btn" onclick="showTab('results')">경기 결과</button>
+            <button class="tab-btn" onclick="showTab('statistics')">통계</button>
+            <button class="tab-btn" onclick="showTab('settings')">설정</button>
+        </nav>
+
+        <!-- 플레이어 관리 탭 -->
+        <div id="players-tab" class="tab-content active">
+            <h2>플레이어 목록</h2>
+            <div class="add-player-form">
+                <h3>새 플레이어 추가</h3>
+                <form id="add-player-form">
+                    <div class="form-group">
+                        <label>이름:</label>
+                        <input type="text" id="player-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Riot ID:</label>
+                        <input type="text" id="riot-id" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Tag Line:</label>
+                        <input type="text" id="tag-line" required placeholder="KR1">
+                    </div>
+                    <div class="form-group">
+                        <label>주 포지션:</label>
+                        <select id="main-position" required>
+                            <option value="TOP">탑</option>
+                            <option value="JUNGLE">정글</option>
+                            <option value="MIDDLE">미드</option>
+                            <option value="BOTTOM">원딜</option>
+                            <option value="UTILITY">서포터</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>부 포지션 (복수 선택):</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" value="TOP"> 탑</label>
+                            <label><input type="checkbox" value="JUNGLE"> 정글</label>
+                            <label><input type="checkbox" value="MIDDLE"> 미드</label>
+                            <label><input type="checkbox" value="BOTTOM"> 원딜</label>
+                            <label><input type="checkbox" value="UTILITY"> 서포터</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>포지션 제약 조건:</label>
+                        <div class="constraint-group">
+                            <div>
+                                <label>고정 포지션 (이 포지션만 가능):</label>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" name="fixed" value="TOP"> 탑</label>
+                                    <label><input type="checkbox" name="fixed" value="JUNGLE"> 정글</label>
+                                    <label><input type="checkbox" name="fixed" value="MIDDLE"> 미드</label>
+                                    <label><input type="checkbox" name="fixed" value="BOTTOM"> 원딜</label>
+                                    <label><input type="checkbox" name="fixed" value="UTILITY"> 서포터</label>
+                                </div>
+                            </div>
+                            <div>
+                                <label>제외 포지션 (이 포지션은 불가능):</label>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" name="excluded" value="TOP"> 탑</label>
+                                    <label><input type="checkbox" name="excluded" value="JUNGLE"> 정글</label>
+                                    <label><input type="checkbox" name="excluded" value="MIDDLE"> 미드</label>
+                                    <label><input type="checkbox" name="excluded" value="BOTTOM"> 원딜</label>
+                                    <label><input type="checkbox" name="excluded" value="UTILITY"> 서포터</label>
+                                </div>
+                            </div>
+                        </div>
+                        <small>예: 정글만 가능 → 고정 포지션에 정글만 체크<br>
+                               원딜 빼고 가능 → 제외 포지션에 원딜 체크</small>
+                    </div>
+                    <button type="submit">플레이어 추가</button>
+                </form>
+            </div>
+
+            <div class="players-list">
+                <h3>등록된 플레이어</h3>
+                <div id="players-container"></div>
+            </div>
+            
+            <div class="match-sync-section">
+                <h3>내전 기록 동기화</h3>
+                <p>Riot API에서 내전 기록을 가져와서 로컬에 저장합니다.</p>
+                <div class="sync-controls">
+                    <div class="form-group">
+                        <label>동기화할 플레이어 선택 (선택 안 하면 전체):</label>
+                        <select id="sync-player-select" multiple style="min-height: 100px;">
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>가져올 매치 수 (플레이어당):</label>
+                        <input type="number" id="sync-match-count" value="20" min="1" max="100">
+                    </div>
+                    <button onclick="syncMatches()" id="sync-btn">매치 동기화 시작</button>
+                    <div id="sync-status"></div>
+                </div>
+                <div class="match-info">
+                    <p>저장된 매치 수: <strong id="stored-match-count">0</strong>개</p>
+                    <button onclick="loadMatchCount()">매치 수 새로고침</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 매치메이킹 탭 -->
+        <div id="matchmaking-tab" class="tab-content">
+            <h2>팀 편성</h2>
+            <div class="player-selection">
+                <h3>참가 플레이어 관리</h3>
+                <div class="matchmaking-controls">
+                    <select id="player-select-dropdown">
+                        <option value="">플레이어 선택...</option>
+                    </select>
+                    <button onclick="addPlayerToMatchmaking()">추가</button>
+                    <span id="player-count-display">선택된 플레이어: <strong>0</strong>/10</span>
+                </div>
+                <div id="selected-players-list" class="selected-players"></div>
+                <button onclick="runMatchmaking()" id="matchmaking-btn" disabled>매치메이킹 실행</button>
+            </div>
+            <div id="matchmaking-results"></div>
+        </div>
+
+        <!-- 경기 결과 탭 -->
+        <div id="results-tab" class="tab-content">
+            <h2>경기 결과 입력</h2>
+            <form id="match-result-form">
+                <div class="form-group">
+                    <label>팀 A 플레이어 (5명):</label>
+                    <div id="team-a-selection" class="team-selection"></div>
+                </div>
+                <div class="form-group">
+                    <label>팀 B 플레이어 (5명):</label>
+                    <div id="team-b-selection" class="team-selection"></div>
+                </div>
+                <div class="form-group">
+                    <label>승리 팀:</label>
+                    <select id="winner-team" required>
+                        <option value="team_a">팀 A</option>
+                        <option value="team_b">팀 B</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>게임 시간 (초):</label>
+                    <input type="number" id="game-duration" value="1800" required>
+                </div>
+                <div class="form-group">
+                    <label>골드 차이 (팀 A 기준):</label>
+                    <input type="number" id="gold-diff" value="0">
+                </div>
+                <div class="form-group">
+                    <label>킬 차이 (팀 A 기준):</label>
+                    <input type="number" id="kill-diff" value="0">
+                </div>
+                <button type="submit">결과 제출</button>
+            </form>
+        </div>
+
+        <!-- 통계 탭 -->
+        <div id="statistics-tab" class="tab-content">
+            <h2>통계</h2>
+            <div class="statistics-controls">
+                <button onclick="loadStatistics()">전체 통계 새로고침</button>
+                <select id="statistics-player-filter" multiple>
+                    <option value="">모든 플레이어</option>
+                </select>
+                <button onclick="loadFilteredStatistics()">선택한 플레이어 통계</button>
+            </div>
+            <div id="statistics-content">
+                <div class="stat-section">
+                    <h3>포지션별 통계</h3>
+                    <div id="position-statistics"></div>
+                </div>
+                <div class="stat-section">
+                    <h3>챔피언별 통계</h3>
+                    <div id="champion-statistics"></div>
+                </div>
+                <div class="stat-section">
+                    <h3>플레이어별 통계</h3>
+                    <div id="player-statistics"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 설정 탭 -->
+        <div id="settings-tab" class="tab-content">
+            <h2>설정</h2>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label>Riot API 키:</label>
+                    <input type="password" id="api-key" placeholder="Riot API 키를 입력하세요">
+                    <small>Riot Developer Portal에서 발급받을 수 있습니다.</small>
+                </div>
+                <button type="submit">설정 저장</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
