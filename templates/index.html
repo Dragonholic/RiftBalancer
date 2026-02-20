@@ -133,7 +133,12 @@
                 <div id="selected-players-list" class="selected-players"></div>
                 <button onclick="runMatchmaking()" id="matchmaking-btn" disabled>매치메이킹 실행</button>
             </div>
-            <div id="matchmaking-results"></div>
+            <div id="matchmaking-results">
+                <p style="text-align: center; color: #666; padding: 40px;">
+                    위에서 10명의 플레이어를 선택한 후 "매치메이킹 실행" 버튼을 클릭하세요.<br>
+                    최적의 팀 조합 2가지를 추천해드립니다.
+                </p>
+            </div>
         </div>
 
         <!-- 경기 결과 탭 -->
@@ -166,6 +171,11 @@
                 <div class="form-group">
                     <label>킬 차이 (팀 A 기준):</label>
                     <input type="number" id="kill-diff" value="0">
+                </div>
+                <div class="form-group">
+                    <label>Riot 매치 ID (선택사항):</label>
+                    <input type="text" id="riot-match-id" placeholder="KR_1234567890">
+                    <small>Riot API에서 자동으로 경기 데이터를 가져오려면 매치 ID를 입력하세요.</small>
                 </div>
                 <button type="submit">결과 제출</button>
             </form>

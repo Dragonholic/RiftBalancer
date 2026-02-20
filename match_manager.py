@@ -142,10 +142,59 @@ class MatchManager:
                     else:
                         position_penalty += 30.0  # 미숙 포지션 페널티
         
-        # Cost = MMR 차이 + 포지션 페널티 (시너지는 이미 adjusted_mmr에 반영됨)
-        cost = mmr_diff + position_penalty
+        # 밸런스 페널티 계산 (같은 팀에 자주 배치되고 승률이 높은 조합에 페널티)
+        balance_penalty = self._calculate_balance_penalty(team_a, team_b)
+        
+        # Cost = MMR 차이 + 포지션 페널티 + 밸런스 페널티
+        # 시너지는 이미 adjusted_mmr에 반영되지만, 밸런스를 위해 분리 페널티 추가
+        cost = mmr_diff + position_penalty + balance_penalty
         
         return cost
+    
+    def _calculate_balance_penalty(self, team_a: Team, team_b: Team) -> float:
+        """
+        밸런스 페널티를 계산합니다.
+        같은 팀에 자주 배치되고 승률이 높은 조합에 페널티를 부여하여 분리합니다.
+        
+        Args:
+            team_a: 첫 번째 팀
+            team_b: 두 번째 팀
+            
+        Returns:
+            밸런스 페널티 값
+        """
+        penalty = 0.0
+        
+        # 각 팀에 대해 분석
+        for team in [team_a, team_b]:
+            team_penalty = 0.0
+            
+            # 팀 내 모든 플레이어 쌍에 대해 분석
+            for i, player1 in enumerate(team.players):
+                for player2 in team.players[i+1:]:
+                    # 팀 배치 이력 가져오기
+                    history = player1.get_team_history(player2.name)
+                    games_together = history.get('games_together', 0)
+                    winrate = history.get('winrate', 0.5)
+                    
+                    # 같은 팀에 3회 이상 배치되고 승률이 70% 이상이면 페널티
+                    if games_together >= 3 and winrate >= 0.7:
+                        # 게임 횟수와 승률에 비례하여 페널티 증가
+                        frequency_factor = min(1.0, games_together / 5)  # 5회 이상이면 최대
+                        winrate_factor = (winrate - 0.7) / 0.3  # 0.7~1.0을 0~1로 정규화
+                        
+                        # 페널티 계산 (최대 100점)
+                        pair_penalty = (frequency_factor * winrate_factor) * 100
+                        team_penalty += pair_penalty
+                    
+                    # 같은 팀에 5회 이상 배치되면 추가 페널티 (승률 무관)
+                    elif games_together >= 5:
+                        frequency_penalty = (games_together - 4) * 20  # 5회부터 회당 20점
+                        team_penalty += frequency_penalty
+            
+            penalty += team_penalty
+        
+        return penalty
     
     def find_best_matches(self, top_n: int = 3) -> List[Tuple[Team, Team, float]]:
         """

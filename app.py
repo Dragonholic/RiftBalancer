@@ -14,6 +14,7 @@ from rating_system import RatingSystem
 from riot_api_client import RiotAPIClient
 from statistics import StatisticsCalculator
 from match_storage import MatchStorage
+from synergy_analyzer import SynergyAnalyzer
 from datetime import datetime
 
 app = Flask(__name__)
@@ -24,6 +25,8 @@ players_db: Dict[str, Player] = {}
 riot_client: Optional[RiotAPIClient] = None
 rating_system = RatingSystem()
 match_storage = MatchStorage()
+synergy_analyzer = SynergyAnalyzer()
+selected_matches: Dict[str, Dict] = {}  # 선택된 매치 조합 저장 {match_id: match_data}
 
 
 def init_riot_client(api_key: str):
@@ -54,6 +57,9 @@ def load_players_from_file():
                     # 챔피언 승률 데이터 로드
                     if 'champion_winrates' in player_data:
                         player.champion_winrates = player_data['champion_winrates']
+                    # 팀 배치 이력 로드
+                    if 'team_history' in player_data:
+                        player.team_history = player_data['team_history']
                     # 최근 경기 로드
                     for match_data in player_data.get('recent_matches', []):
                         match = RecentMatch(
@@ -84,10 +90,11 @@ def save_players_to_file():
             'rating': player.rating,
             'main_position': player.main_position,
             'off_positions': player.off_positions,
-            'fixed_positions': player.fixed_positions,
-            'excluded_positions': player.excluded_positions,
-            'champion_winrates': player.champion_winrates,
-            'recent_matches': [
+                    'fixed_positions': player.fixed_positions,
+                    'excluded_positions': player.excluded_positions,
+                    'champion_winrates': player.champion_winrates,
+                    'team_history': player.team_history,
+                    'recent_matches': [
                 {
                     'win': m.win,
                     'kills': m.kills,
@@ -211,15 +218,18 @@ def matchmaking():
             return jsonify({'error': f'플레이어 "{name}"를 찾을 수 없습니다.'}), 404
         selected_players.append(players_db[name])
     
-    # 매치메이킹 실행
+    # 매치메이킹 실행 (최적 조합 2개 반환)
     match_manager = MatchManager(selected_players)
-    best_matches = match_manager.find_best_matches(top_n=3)
+    best_matches = match_manager.find_best_matches(top_n=2)
     
-    # 결과 포맷팅
+    # 결과 포맷팅 및 매치 ID 생성
+    import uuid
     results = []
     for team_a, team_b, cost in best_matches:
+        match_id = str(uuid.uuid4())
         win_rate_a = match_manager.get_expected_win_rate(team_a, team_b)
-        results.append({
+        
+        match_data = {
             'team_a': {
                 'players': [p.name for p in team_a.players],
                 'positions': team_a.positions,
@@ -233,8 +243,19 @@ def matchmaking():
                 'synergy_bonus': round(team_b.synergy_bonus, 2)
             },
             'cost': round(cost, 2),
-            'expected_win_rate': round(win_rate_a * 100, 2)
-        })
+            'expected_win_rate': round(win_rate_a * 100, 2),
+            'match_id': match_id
+        }
+        
+        # 선택된 매치 저장
+        selected_matches[match_id] = {
+            'team_a_players': [p.name for p in team_a.players],
+            'team_b_players': [p.name for p in team_b.players],
+            'team_a_positions': team_a.positions,
+            'team_b_positions': team_b.positions
+        }
+        
+        results.append(match_data)
     
     return jsonify({'matches': results})
 
@@ -250,6 +271,8 @@ def submit_match_result():
     game_duration = data.get('game_duration', 1800)  # 기본 30분
     gold_diff = data.get('gold_diff', 0)
     kill_diff = data.get('kill_diff', 0)
+    match_id = data.get('match_id')  # 선택된 매치 ID
+    riot_match_id = data.get('riot_match_id')  # Riot API 매치 ID (선택사항)
     
     # 플레이어 객체 가져오기
     team_a_players = [players_db[name] for name in team_a_names if name in players_db]
@@ -261,11 +284,44 @@ def submit_match_result():
     team_a = Team(players=team_a_players)
     team_b = Team(players=team_b_players)
     
-    # 포지션 할당
-    for player in team_a_players:
-        team_a.assign_position(player.name, player.main_position)
-    for player in team_b_players:
-        team_b.assign_position(player.name, player.main_position)
+    # 포지션 할당 (선택된 매치에서 가져오거나 기본값 사용)
+    if match_id and match_id in selected_matches:
+        match_data = selected_matches[match_id]
+        for player_name, position in match_data.get('team_a_positions', {}).items():
+            if player_name in team_a_names:
+                team_a.assign_position(player_name, position)
+        for player_name, position in match_data.get('team_b_positions', {}).items():
+            if player_name in team_b_names:
+                team_b.assign_position(player_name, position)
+    else:
+        # 기본 포지션 할당
+        for player in team_a_players:
+            team_a.assign_position(player.name, player.main_position)
+        for player in team_b_players:
+            team_b.assign_position(player.name, player.main_position)
+    
+    # Riot API에서 매치 데이터 가져오기 (가능한 경우)
+    team_a_stats = {}
+    team_b_stats = {}
+    
+    if riot_client and riot_match_id:
+        try:
+            match_data = riot_client.get_match_details(riot_match_id)
+            if match_data:
+                # 각 플레이어의 통계 추출
+                for player in team_a_players:
+                    if player.puuid:
+                        stats = riot_client.extract_match_stats(match_data, player.puuid)
+                        if stats:
+                            team_a_stats[player.name] = stats
+                
+                for player in team_b_players:
+                    if player.puuid:
+                        stats = riot_client.extract_match_stats(match_data, player.puuid)
+                        if stats:
+                            team_b_stats[player.name] = stats
+        except Exception as e:
+            print(f"Riot API에서 매치 데이터 가져오기 실패: {e}")
     
     # 레이팅 업데이트
     rating_system.update_ratings(
@@ -277,17 +333,39 @@ def submit_match_result():
         kill_diff=kill_diff
     )
     
-    # 챔피언 정보 가져오기 (요청에 포함된 경우)
-    champion_data = data.get('champions', {})  # {player_name: champion_name}
+    # 시너지 분석 및 업데이트
+    synergy_analyzer.analyze_match_result(
+        team_a=team_a,
+        team_b=team_b,
+        team_a_won=team_a_won,
+        game_duration=game_duration,
+        gold_diff=gold_diff,
+        kill_diff=kill_diff,
+        team_a_stats=team_a_stats,
+        team_b_stats=team_b_stats
+    )
+    
+    # 챔피언 정보 가져오기 (요청에 포함된 경우 또는 API에서)
+    champion_data = data.get('champions', {})
+    
+    # API에서 가져온 챔피언 정보로 업데이트
+    for player_name, stats in team_a_stats.items():
+        if 'champion' in stats:
+            champion_data[player_name] = stats['champion']
+    for player_name, stats in team_b_stats.items():
+        if 'champion' in stats:
+            champion_data[player_name] = stats['champion']
     
     # 최근 경기 기록 추가
     for player in team_a_players:
         champion = champion_data.get(player.name)
+        player_stats = team_a_stats.get(player.name, {})
+        
         match = RecentMatch(
             win=team_a_won,
-            kills=0,  # 실제 데이터는 API에서 가져와야 함
-            deaths=0,
-            assists=0,
+            kills=player_stats.get('kills', 0),
+            deaths=player_stats.get('deaths', 0),
+            assists=player_stats.get('assists', 0),
             position=team_a.positions.get(player.name, player.main_position),
             game_duration=game_duration,
             champion=champion
@@ -300,11 +378,13 @@ def submit_match_result():
     
     for player in team_b_players:
         champion = champion_data.get(player.name)
+        player_stats = team_b_stats.get(player.name, {})
+        
         match = RecentMatch(
             win=not team_a_won,
-            kills=0,
-            deaths=0,
-            assists=0,
+            kills=player_stats.get('kills', 0),
+            deaths=player_stats.get('deaths', 0),
+            assists=player_stats.get('assists', 0),
             position=team_b.positions.get(player.name, player.main_position),
             game_duration=game_duration,
             champion=champion
@@ -315,11 +395,16 @@ def submit_match_result():
         if champion:
             player.update_champion_stats(champion, not team_a_won)
     
+    # 선택된 매치 제거
+    if match_id and match_id in selected_matches:
+        del selected_matches[match_id]
+    
     save_players_to_file()
     
     return jsonify({
-        'message': '경기 결과가 반영되었습니다.',
-        'updated_ratings': {p.name: round(p.rating, 2) for p in team_a_players + team_b_players}
+        'message': '경기 결과가 반영되었습니다. 시너지 데이터가 업데이트되어 다음 매치메이킹에 반영됩니다.',
+        'updated_ratings': {p.name: round(p.rating, 2) for p in team_a_players + team_b_players},
+        'synergy_updated': True
     })
 
 

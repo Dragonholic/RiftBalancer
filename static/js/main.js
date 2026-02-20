@@ -287,14 +287,25 @@ async function runMatchmaking() {
 function displayMatchmakingResults(matches) {
     const container = document.getElementById('matchmaking-results');
     
-    container.innerHTML = matches.map((match, index) => `
-        <div class="match-result">
+    if (matches.length === 0) {
+        container.innerHTML = '<p class="alert alert-error">조합을 찾을 수 없습니다.</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div class="matchmaking-header">
+            <h3>최적 팀 조합 2가지</h3>
+            <p>아래 조합 중 하나를 선택하여 경기를 진행하세요.</p>
+        </div>
+        ${matches.map((match, index) => `
+        <div class="match-result ${index === 0 ? 'recommended' : ''}" data-match-index="${index}">
+            ${index === 0 ? '<div class="recommended-badge">추천</div>' : ''}
             <div class="match-header">
                 <h3>조합 ${index + 1}</h3>
                 <div class="match-cost">Cost: ${match.cost}</div>
             </div>
             <p style="text-align: center; font-size: 1.2em; margin-bottom: 15px;">
-                예상 승률: 팀 A ${match.expected_win_rate}% vs 팀 B ${(100 - match.expected_win_rate).toFixed(2)}%
+                예상 승률: 팀 A <strong>${match.expected_win_rate}%</strong> vs 팀 B <strong>${(100 - match.expected_win_rate).toFixed(2)}%</strong>
             </p>
             <div class="team-display">
                 <div class="team-box team-a">
@@ -320,8 +331,65 @@ function displayMatchmakingResults(matches) {
                     `).join('')}
                 </div>
             </div>
+            <div class="match-actions">
+                <button class="select-match-btn" onclick="selectMatch(${index})" data-match-data='${JSON.stringify(match)}'>
+                    이 조합 선택하기
+                </button>
+            </div>
         </div>
-    `).join('');
+    `).join('')}`;
+}
+
+// 선택된 매치 데이터 저장
+let selectedMatchData = null;
+
+// 매치 선택 함수
+function selectMatch(matchIndex) {
+    const matchResults = document.querySelectorAll('.match-result');
+    const selectedMatch = matchResults[matchIndex];
+    const matchData = JSON.parse(selectedMatch.querySelector('.select-match-btn').getAttribute('data-match-data'));
+    
+    // 선택된 매치 데이터 저장
+    selectedMatchData = matchData;
+    
+    // 선택된 매치 강조
+    matchResults.forEach(m => m.classList.remove('selected'));
+    selectedMatch.classList.add('selected');
+    
+    // 경기 결과 탭으로 이동
+    showTab('results');
+    
+    // 경기 결과 폼에 자동으로 채우기
+    setTimeout(() => {
+        fillMatchResultForm(matchData);
+    }, 100);
+}
+
+// 경기 결과 폼 자동 채우기
+function fillMatchResultForm(matchData) {
+    // 팀 A 플레이어 선택
+    const teamACheckboxes = document.querySelectorAll('input[name="team-a"]');
+    teamACheckboxes.forEach(cb => {
+        cb.checked = matchData.team_a.players.includes(cb.value);
+    });
+    
+    // 팀 B 플레이어 선택
+    const teamBCheckboxes = document.querySelectorAll('input[name="team-b"]');
+    teamBCheckboxes.forEach(cb => {
+        cb.checked = matchData.team_b.players.includes(cb.value);
+    });
+    
+    // 알림 표시
+    const form = document.getElementById('match-result-form');
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success';
+    alertDiv.innerHTML = `<strong>조합 ${matchData.expected_win_rate > 50 ? '1' : '2'}이 선택되었습니다.</strong> 팀 구성이 자동으로 입력되었습니다.`;
+    form.insertBefore(alertDiv, form.firstChild);
+    
+    // 3초 후 알림 제거
+    setTimeout(() => {
+        alertDiv.remove();
+    }, 3000);
 }
 
 // 팀 선택 업데이트
@@ -353,10 +421,31 @@ document.getElementById('match-result-form').addEventListener('submit', async (e
     const gameDuration = parseInt(document.getElementById('game-duration').value);
     const goldDiff = parseInt(document.getElementById('gold-diff').value);
     const killDiff = parseInt(document.getElementById('kill-diff').value);
+    const riotMatchId = document.getElementById('riot-match-id').value.trim();
 
     if (teamA.length !== 5 || teamB.length !== 5) {
         alert('각 팀은 정확히 5명이어야 합니다.');
         return;
+    }
+
+    // 제출 데이터 준비
+    const submitData = {
+        team_a: teamA,
+        team_b: teamB,
+        team_a_won: winner === 'team_a',
+        game_duration: gameDuration,
+        gold_diff: goldDiff,
+        kill_diff: killDiff
+    };
+    
+    // 선택된 매치 ID 추가
+    if (selectedMatchData && selectedMatchData.match_id) {
+        submitData.match_id = selectedMatchData.match_id;
+    }
+    
+    // Riot 매치 ID 추가 (있는 경우)
+    if (riotMatchId) {
+        submitData.riot_match_id = riotMatchId;
     }
 
     try {
@@ -365,20 +454,14 @@ document.getElementById('match-result-form').addEventListener('submit', async (e
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                team_a: teamA,
-                team_b: teamB,
-                team_a_won: winner === 'team_a',
-                game_duration: gameDuration,
-                gold_diff: goldDiff,
-                kill_diff: killDiff
-            })
+            body: JSON.stringify(submitData)
         });
 
         const data = await response.json();
         if (response.ok) {
-            alert('경기 결과가 반영되었습니다.');
+            alert('경기 결과가 반영되었습니다.\n시너지 데이터가 업데이트되어 다음 매치메이킹에 반영됩니다.');
             document.getElementById('match-result-form').reset();
+            selectedMatchData = null;  // 선택된 매치 데이터 초기화
             loadPlayers();
         } else {
             alert('오류: ' + data.error);
@@ -433,7 +516,19 @@ function showTab(tabName) {
     
     // 선택한 탭 표시
     document.getElementById(`${tabName}-tab`).classList.add('active');
-    event.target.classList.add('active');
+    
+    // 이벤트가 있는 경우에만 버튼 활성화
+    if (event && event.target) {
+        event.target.classList.add('active');
+    } else {
+        // 프로그래밍 방식 호출 시 해당 버튼 찾기
+        const buttons = document.querySelectorAll('.tab-btn');
+        buttons.forEach(btn => {
+            if (btn.textContent.includes(getTabName(tabName))) {
+                btn.classList.add('active');
+            }
+        });
+    }
     
     // 플레이어 목록 새로고침
     if (tabName === 'players' || tabName === 'matchmaking' || tabName === 'results') {
@@ -444,6 +539,18 @@ function showTab(tabName) {
     if (tabName === 'statistics') {
         loadStatistics();
     }
+}
+
+// 탭 이름 매핑
+function getTabName(tabKey) {
+    const tabNames = {
+        'players': '플레이어 관리',
+        'matchmaking': '매치메이킹',
+        'results': '경기 결과',
+        'statistics': '통계',
+        'settings': '설정'
+    };
+    return tabNames[tabKey] || '';
 }
 
 // 통계 로드

@@ -4,7 +4,7 @@ Player 클래스 모듈
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 
@@ -51,6 +51,7 @@ class Player:
     recent_matches: List[RecentMatch] = field(default_factory=list)
     synergy_data: dict = field(default_factory=dict)
     champion_winrates: Dict[str, Dict[str, float]] = field(default_factory=dict)  # {champion: {wins, total, winrate}}
+    team_history: Dict[str, Dict[str, float]] = field(default_factory=dict)  # {player_name: {games_together, wins, winrate}}
     
     def __post_init__(self):
         """초기화 후 검증"""
@@ -93,6 +94,59 @@ class Player:
             return total_kills + total_assists
         
         return (total_kills + total_assists) / total_deaths
+
+    def _get_recent_streak(self) -> Tuple[int, bool]:
+        """
+        최근 연승/연패 정보를 계산합니다.
+
+        Returns:
+            (streak_len, is_win_streak)
+        """
+        if not self.recent_matches:
+            return 0, True
+
+        first_is_win = self.recent_matches[0].win
+        length = 0
+        for match in self.recent_matches:
+            if match.win == first_is_win:
+                length += 1
+            else:
+                break
+        return length, first_is_win
+
+    def _get_form_multiplier(self) -> float:
+        """
+        근황 폼(연승/연패, 최근 승률)을 반영한 레이팅 보정 계수를 계산합니다.
+        
+        - **연패**: 다음 판에서 **이기기 쉽도록** 팀을 강하게 만들어주기 위해
+          실질 레이팅을 올려서 강한 팀에 배정되기 쉽게 합니다.
+        - **연승**: 살짝만 너프해서 한 팀이 계속 이기지 않도록 조정합니다.
+        """
+        base = 1.0
+        
+        # 최근 승률 기반 (form_score: 0.0 ~ 1.0, 기본 0.5)
+        form = self.form_score
+        if form < 0.5:
+            # 폼이 나쁘면 보호 버프: 최대 +10% 정도
+            # form=0   → +0.10, form=0.25 → +0.05
+            base += (0.5 - form) * 0.2
+        else:
+            # 폼이 좋을수록 살짝만 너프: 최대 -4% 정도
+            # form=1 → -0.04
+            base -= (form - 0.5) * 0.08
+        
+        # 연승/연패 스트릭 기반 보정
+        streak_len, is_win_streak = self._get_recent_streak()
+        if streak_len >= 3:
+            if is_win_streak:
+                # 연승 스트릭은 약하게 너프 (3연승부터 최대 -4%)
+                base -= min(0.04, 0.01 * (streak_len - 2))
+            else:
+                # 연패 스트릭은 강하게 버프 (3연패부터 최대 +12%)
+                base += min(0.12, 0.03 * (streak_len - 2))
+        
+        # 계수 범위 제한 (연패 보호: 최대 +15%, 연승 너프: 최대 -8%)
+        return max(0.92, min(1.15, base))
     
     def can_play_position(self, position: str) -> bool:
         """
@@ -127,12 +181,17 @@ class Player:
         if not self.can_play_position(position):
             return 0.0  # 플레이 불가능한 포지션
         
+        # 포지션에 따른 기본 레이팅
         if position == self.main_position:
-            return self.rating  # 주 포지션: 100%
+            base_rating = self.rating  # 주 포지션: 100%
         elif position in self.off_positions:
-            return self.rating * 0.85  # 부 포지션: 85%
+            base_rating = self.rating * 0.85  # 부 포지션: 85%
         else:
-            return self.rating * 0.70  # 미숙 포지션: 70%
+            base_rating = self.rating * 0.70  # 미숙 포지션: 70%
+
+        # 근황 폼(연승/연패, 최근 승률) 보정
+        form_multiplier = self._get_form_multiplier()
+        return base_rating * form_multiplier
     
     def add_match(self, match: RecentMatch):
         """
@@ -166,6 +225,43 @@ class Player:
             score: 시너지 점수 (-1.0 ~ 1.0)
         """
         self.synergy_data[other_player_name] = max(-1.0, min(1.0, score))
+    
+    def get_team_history(self, other_player_name: str) -> Dict[str, float]:
+        """
+        다른 플레이어와의 팀 배치 이력을 가져옵니다.
+        
+        Args:
+            other_player_name: 상대 플레이어 이름
+            
+        Returns:
+            {games_together, wins, winrate} 딕셔너리
+        """
+        return self.team_history.get(other_player_name, {
+            'games_together': 0,
+            'wins': 0,
+            'winrate': 0.5
+        })
+    
+    def update_team_history(self, other_player_name: str, won: bool):
+        """
+        다른 플레이어와의 팀 배치 이력을 업데이트합니다.
+        
+        Args:
+            other_player_name: 상대 플레이어 이름
+            won: 승리 여부
+        """
+        if other_player_name not in self.team_history:
+            self.team_history[other_player_name] = {
+                'games_together': 0,
+                'wins': 0,
+                'winrate': 0.5
+            }
+        
+        history = self.team_history[other_player_name]
+        history['games_together'] += 1
+        if won:
+            history['wins'] += 1
+        history['winrate'] = history['wins'] / history['games_together'] if history['games_together'] > 0 else 0.5
     
     def get_position_winrate(self, position: str) -> float:
         """
