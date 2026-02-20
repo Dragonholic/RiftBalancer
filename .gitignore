@@ -27,13 +27,43 @@ wheels/
 instance/
 .webassets-cache
 
-# 데이터 파일
+# ============================================
+# 내부 통계 및 사용자 데이터 파일
+# ============================================
+# 이 파일들은 Git에 커밋하면 안 됩니다!
+# - 플레이어 개인정보 (Riot ID, PUUID 등)
+# - 레이팅 및 통계 데이터
+# - 경기 기록 및 챔피언 승률
 players.json
+
+# 매치 데이터
+# - Riot API에서 가져온 내전 기록
+# - 플레이어 통계 및 성적 데이터
 matches.json
 
-# 환경 변수
+# 환경 변수 및 설정 파일
+# - Riot API 키 등 민감한 정보
 .env
 .env.local
+.env.production
+config.py  # API 키가 포함될 수 있음
+
+# 세션 및 캐시 파일
+*.session
+*.cache
+session/
+
+# 로그 파일
+*.log
+logs/
+app.log
+
+# 백업 파일
+*.bak
+*.backup
+*~
+backup/
+backups/
 
 # IDE
 .vscode/

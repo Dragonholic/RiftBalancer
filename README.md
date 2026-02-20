@@ -40,9 +40,24 @@ RiftBalancer/
 
 ### 1. 의존성 설치
 
+자세한 설치 가이드는 [INSTALL.md](INSTALL.md)를 참고하세요.
+
 ```bash
+# 가상환경 생성 및 활성화
+python3 -m venv venv
+source venv/bin/activate
+
+# pip 업그레이드
+pip install --upgrade pip
+
+# 패키지 설치
 pip install -r requirements.txt
 ```
+
+**필요한 패키지:**
+- Flask==3.0.0
+- requests==2.31.0
+- Werkzeug==3.0.1
 
 ### 2. Riot API 키 발급
 
@@ -188,6 +203,16 @@ Riot API는 다음 제한이 있습니다:
 - 정기적으로 동기화하여 최신 통계를 유지하세요.
 - 저장된 매치 데이터는 `matches.json`에서 확인할 수 있습니다.
 
+## Git 사용 시 주의사항
+
+**Git에 커밋하면 안 되는 파일들:**
+- `players.json` - 플레이어 개인정보 및 통계 데이터
+- `matches.json` - 매치 기록 데이터
+- `.env` - 환경 변수 (API 키 등)
+- `*.log` - 로그 파일
+
+자세한 내용은 [GIT_GUIDE.md](GIT_GUIDE.md)를 참고하세요.
+
 ## 참고사항
 
 - Riot API 키는 안전하게 보관하세요.
@@ -195,3 +220,4 @@ Riot API는 다음 제한이 있습니다:
 - 매치 데이터는 `matches.json` 파일에 저장됩니다.
 - Rate Limit을 고려하여 동기화는 적절한 간격으로 실행하세요.
 - 저장된 매치 데이터는 통계 계산에 자동으로 반영됩니다.
+- **Git에 공유하기 전에 `.gitignore` 파일을 확인하세요.**
